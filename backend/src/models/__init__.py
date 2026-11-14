@@ -6,3 +6,4 @@ from .run import NetworkRun
 from .review import ResilienceReview
 from .report import Report
 from .audit import AuditEvent
+from .shipment import ShipmentAnalysis

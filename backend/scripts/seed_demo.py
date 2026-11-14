@@ -1,9 +1,10 @@
 import json
 from sqlalchemy import select,func
 from src.config.database import Base,engine,Session
-from src.models import User,NetworkDataset,TransferArc,OutageScenario,NetworkRun,ResilienceReview,Report
+from src.models import User,NetworkDataset,TransferArc,OutageScenario,NetworkRun,ResilienceReview,Report,ShipmentAnalysis
 from src.services.analysis import analyze
 from src.services.arcs import snapshot
+from src.services import shipments as shipment_service
 from src.utils.security import hash_password
 from src.utils.time import now
 def seed():
@@ -25,5 +26,14 @@ def seed():
   if not db.get(NetworkRun,"demo-run"):db.add(NetworkRun(id="demo-run",scenario_id="demo-outage",status="completed",result=analyze(db.get(NetworkDataset,"demo-data"),db.get(OutageScenario,"demo-outage")),error="",created_at=now()));db.flush()
   if not db.get(ResilienceReview,"demo-review"):db.add(ResilienceReview(id="demo-review",run_id="demo-run",note="每条边独立保留ID，逐边容量界与节点守恒通过，最大流等于割容量。最短时长路径是独立指标，不解释为最大流分配。",decision="accepted",author="analyst@hengyuan.demo",created_at=now()));db.flush()
   if not db.get(Report,"demo-report"):db.add(Report(id="demo-report",run_id="demo-run",title="衡远模拟中转·停边韧性复核",published_by="admin@hengyuan.demo",created_at=now()))
-  db.commit();return {m.__tablename__:db.scalar(select(func.count()).select_from(m)) for m in (User,NetworkDataset,TransferArc,OutageScenario,NetworkRun,ResilienceReview,Report)}
+  db.flush()
+  # 预置一个真实完成的限时发运分析：沿用 demo-run 的停 e13 快照，截止24小时
+  if not db.get(ShipmentAnalysis,"demo-shipment"):
+   transfer=[n["node_id"] for n in nodes if n["node_id"] not in ("S","T")]
+   item=ShipmentAnalysis(id="demo-shipment",run_id="demo-run",name="停e13快照·24小时限时发运",status="running",total_cargo=120,deadline_hours=24,stock_limits={n:40 for n in transfer},result={},checkpoint={},error="",created_at=now(),updated_at=now())
+   db.add(item);db.flush()
+   engine,_=shipment_service._build_engine(db,item)
+   engine.run_to_deadline()
+   item.result=shipment_service._assemble_result(db,item,engine);item.status="completed";item.checkpoint={};item.updated_at=now()
+  db.commit();return {m.__tablename__:db.scalar(select(func.count()).select_from(m)) for m in (User,NetworkDataset,TransferArc,OutageScenario,NetworkRun,ResilienceReview,Report,ShipmentAnalysis)}
 if __name__=="__main__":print(json.dumps(seed(),ensure_ascii=False))
